@@ -62,6 +62,35 @@ s3://<your-input-bucket>/datasets/rag/
 
 ## Quick Start
 
+### FinanceBench (native financial PDFs)
+
+The public [FinanceBench release](https://github.com/patronus-ai/financebench)
+contains 150 annotated questions and a document index covering 360 distinct PDF
+filings. Use a pinned checkout with `data/` and `pdfs/` present. The generator
+checks that every indexed PDF is available and has a PDF header, which also
+detects an incomplete Git LFS checkout.
+
+```bash
+git clone https://github.com/patronus-ai/financebench.git /tmp/financebench
+git -C /tmp/financebench rev-parse HEAD  # record this source revision
+python scripts/generate_rag_datasets.py \
+  --dataset financebench \
+  --financebench-dir /tmp/financebench \
+  --output-format pdf \
+  --num-samples 150 \
+  --output-dir ./generated_datasets/financebench/pdf/150
+```
+
+Add `--upload-to-s3` to upload the PDF corpus and benchmark JSON; the script
+prints the manifest entry. A smaller `--num-samples` deterministically chooses
+questions using seed 42, while retaining **all 360 PDFs**, including distractors.
+The emitted gold document names are resolved to S3 object keys during upload.
+Use `FINANCEBENCH_DIR` instead of `--financebench-dir` if preferred.
+
+The standard AutoRAG evaluator checks answer correctness and document retrieval,
+but does not score FinanceBench's page-level evidence or apply numeric and unit
+tolerances. Report its scores as AutoRAG results, not official FinanceBench scores.
+
 ### Install Dependencies
 
 ```bash
