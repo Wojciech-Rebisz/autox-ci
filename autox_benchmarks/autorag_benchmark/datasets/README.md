@@ -91,6 +91,51 @@ The standard AutoRAG evaluator checks answer correctness and document retrieval,
 but does not score FinanceBench's page-level evidence or apply numeric and unit
 tolerances. Report its scores as AutoRAG results, not official FinanceBench scores.
 
+### MultiHop-RAG (article retrieval)
+
+The [MultiHop-RAG dataset](https://huggingface.co/datasets/yixuantt/MultiHopRAG)
+supplies article text, questions, answers, and evidence article URLs. The provider
+keeps the entire article corpus when selecting a smaller number of questions.
+Questions without evidence are excluded because the benchmark requires gold
+document keys. Downloading from Hugging Face is automatic, or provide a local
+directory containing `corpus.json` and `MultiHopRAG.json`:
+
+```bash
+python scripts/generate_rag_datasets.py \
+  --dataset multihop_rag \
+  --multihop-rag-dir /path/to/MultiHopRAG \
+  --output-format txt \
+  --num-samples 50
+```
+
+The provider supports `txt` and `md`. Source articles and the selected question
+order are deterministic for a pinned source revision. The AutoRAG scores are not
+the official MultiHop-RAG evaluation scores.
+
+### FanOutQA (Wikipedia page retrieval)
+
+The [FanOutQA questions](https://github.com/zhudotexe/fanoutqa) and
+[published retrieval corpus](https://huggingface.co/datasets/JinChao1022/fanoutqa-retrieval)
+are downloaded automatically, or supplied as local files. The provider keeps the
+whole retrieval corpus and selects dev questions with 5–10 available evidence
+pages and 4–10 answer values. It excludes time-sensitive questions and rows
+whose answer values do not occur in their evidence pages. A requested sample
+count above the eligible row count raises an error.
+
+```bash
+python scripts/generate_rag_datasets.py \
+  --dataset fanoutqa \
+  --fanoutqa-dev-json /path/to/fanout-final-dev.json \
+  --fanoutqa-corpus-arrow /path/to/data-00000-of-00001.arrow \
+  --output-format txt \
+  --num-samples 100
+```
+
+The provider supports `txt` and `md`. The source files are cached under the
+output directory's `source_cache/` so repeated runs do not redownload them.
+The composite reference answer is built from the published answer values; report
+AutoRAG results separately from official FanOutQA scores.
+
 ### Install Dependencies
 
 ```bash
