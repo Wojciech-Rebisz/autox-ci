@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """Evaluate a completed index with the exact ai4rag pattern from its HPO notebook."""
 
 from __future__ import annotations
@@ -15,11 +16,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_BENCHMARK_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_BENCHMARK_ROOT.parent))
+sys.path.insert(0, str(_BENCHMARK_ROOT))
 
 from autorag_benchmark.config_loader import load_merged_benchmark_config
+from autorag_benchmark.e2e_evaluation import rebase_test_data_document_keys
 from autorag_benchmark.indexing_from_hpo import extract_best_pattern_settings
-from autorag_benchmark.indexing_report import find_indexing_report_key
+from autorag_benchmark.indexing_report import find_indexing_report_key, store_binding_from_report
 from autorag_benchmark.metrics.quality_metrics import aggregate_evaluation_results
 from autorag_benchmark.pattern_scores import create_s3_client
 from autorag_benchmark.pipeline_names import INDEXING_PIPELINE_NAME
@@ -35,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--env-file", type=Path)
     p.add_argument("--test-data-key", required=True)
+    p.add_argument("--indexed-data-key", help="S3 knowledge-base prefix used by the indexing run")
     p.add_argument("--pattern-name")
     p.add_argument("--max-questions", type=int)
     p.add_argument("--workers", type=int, default=4)
@@ -195,7 +200,7 @@ def build_rows(test_data: list[dict[str, Any]], responses: list[Any]) -> list[di
     for item, response in zip(test_data, responses):
         contexts = [
             {
-                "text": str(getattr(d, "page_content", "")),
+                "text": str(getattr(d, "text", getattr(d, "page_content", ""))),
                 "document_id": str((getattr(d, "metadata", {}) or {}).get("document_id", "")),
             }
             for d in response.get("reference_documents", [])
@@ -209,6 +214,19 @@ def build_rows(test_data: list[dict[str, Any]], responses: list[Any]) -> list[di
             "metrics": [],
         })
     return rows
+
+
+def evaluation_benchmark_records(test_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Adapt the stored QA document keys to ai4rag's benchmark column name."""
+    return [
+        {
+            **item,
+            "correct_answer_document_ids": item.get(
+                "correct_answer_document_ids", item.get("correct_answer_document_keys", [])
+            ),
+        }
+        for item in test_data
+    ]
 
 
 def main() -> int:
@@ -237,17 +255,24 @@ def main() -> int:
         raise RuntimeError(f"No indexing report under s3://{bucket}/{prefix}")
     report = json.loads(s3.get_object(Bucket=bucket, Key=report_key)["Body"].read())
     report_settings = report.get("settings") or {}
-    binding = report_settings.get("vector_store_binding") or {}
+    binding = store_binding_from_report(report)
     collection = binding.get("collection_name")
     provider = binding.get("provider_type")
     if not collection or not provider:
-        raise RuntimeError("Indexing report lacks collection name/provider type")
+        raise RuntimeError(
+            "Indexing report lacks settings.store_binding.collection_name/provider_type "
+            f"(settings keys: {sorted(report_settings)})"
+        )
 
     test_data = json.loads(s3.get_object(Bucket=bucket, Key=a.test_data_key)["Body"].read())
     if not isinstance(test_data, list):
         raise RuntimeError("Benchmark test data must be a JSON array")
     if a.max_questions:
         test_data = test_data[:a.max_questions]
+    if a.indexed_data_key:
+        test_data = rebase_test_data_document_keys(
+            test_data, test_data_key=a.test_data_key, indexed_data_key=a.indexed_data_key,
+        )
 
     try:
         from ai4rag.core.experiment.benchmark_data import BenchmarkData
@@ -264,6 +289,7 @@ def main() -> int:
             "Install the generated notebook runtime: python3 -m pip install 'ai4rag~=0.15.0'"
         ) from e
 
+    benchmark_data = BenchmarkData(DataFrame(data=evaluation_benchmark_records(test_data)))
     client = create_maas_client(base_url=os.environ["MAAS_BASE_URL"], api_key=os.environ["MAAS_API_KEY"])
 
     embedding = report_settings.get("embedding") or pattern.get("embedding") or {}
@@ -297,7 +323,7 @@ def main() -> int:
     responses = generate_answers(rag, test_data, a.workers)
     rows = build_rows(test_data, responses)
 
-    data = build_evaluation_data(BenchmarkData(DataFrame(data=test_data)), responses)
+    data = build_evaluation_data(benchmark_data, responses)
     from ai4rag.evaluator.metric import Metrics
     from ai4rag.evaluator.unitxt_evaluator import UnitxtEvaluator
 

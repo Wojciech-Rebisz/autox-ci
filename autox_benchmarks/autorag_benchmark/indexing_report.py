@@ -59,6 +59,12 @@ def find_indexing_report_key(s3_client: Any, bucket: str, prefix: str) -> str | 
     return None
 
 
+def store_binding_from_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Read the current indexing binding, accepting older report naming too."""
+    settings = report.get("settings") or {}
+    return settings.get("store_binding") or settings.get("vector_store_binding") or {}
+
+
 def flatten_report(report: dict[str, Any]) -> dict[str, Any]:
     """Flatten nested indexing report into prefixed columns."""
     flat: dict[str, Any] = {}
@@ -69,7 +75,7 @@ def flatten_report(report: dict[str, Any]) -> dict[str, Any]:
     flat["indexing_total_chunks"] = report.get("total_chunks")
 
     settings = report.get("settings", {})
-    vsb = settings.get("vector_store_binding", {})
+    vsb = store_binding_from_report(report)
     flat["indexing_collection_name"] = vsb.get("collection_name", "")
     flat["indexing_provider_type"] = vsb.get("provider_type", "")
 

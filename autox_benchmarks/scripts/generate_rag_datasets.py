@@ -86,6 +86,21 @@ def main():
         help="Output format for knowledge base documents (default: txt). "
              "Audio formats (wav, mp3, flac) apply to --dataset spoken_squad.",
     )
+    parser.add_argument(
+        "--include-all-pdfs",
+        action="store_true",
+        help="For Open RAGBench PDF, include all source PDF URLs, including hard negatives",
+    )
+    parser.add_argument(
+        "--require-entry-count",
+        type=int,
+        help="Abort before upload unless this many evaluation entries were generated",
+    )
+    parser.add_argument(
+        "--require-doc-count",
+        type=int,
+        help="Abort before upload unless this many knowledge-base files were generated",
+    )
 
     # BEIR-specific options
     parser.add_argument(
@@ -216,6 +231,8 @@ def main():
     )
 
     args = parser.parse_args()
+    if args.include_all_pdfs and (args.dataset != "open_ragbench" or args.output_format != "pdf"):
+        parser.error("--include-all-pdfs requires --dataset open_ragbench --output-format pdf")
 
     # Import dataset registry
     from autorag_benchmark.datasets import get, list_datasets
@@ -259,6 +276,8 @@ def main():
     options = dict(default_options)
     options["num_samples"] = args.num_samples
     options["output_format"] = args.output_format
+    if args.include_all_pdfs:
+        options["include_all_pdfs"] = True
 
     if args.dataset == "beir":
         options["beir_dataset"] = args.beir_dataset
@@ -334,6 +353,17 @@ def main():
     print(f"Knowledge base: {kb_dir}")
     print(f"Benchmark data: {bench_path}")
     print()
+
+    if args.require_entry_count is not None and num_entries != args.require_entry_count:
+        parser.error(
+            f"expected {args.require_entry_count} benchmark entries, generated {num_entries}; "
+            "nothing was uploaded"
+        )
+    if args.require_doc_count is not None and num_docs != args.require_doc_count:
+        parser.error(
+            f"expected {args.require_doc_count} knowledge-base files, generated {num_docs}; "
+            "nothing was uploaded"
+        )
 
     # Upload to S3 if requested
     input_data_key = None

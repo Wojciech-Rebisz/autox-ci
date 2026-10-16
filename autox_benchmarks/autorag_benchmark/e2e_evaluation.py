@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,54 @@ from typing import Any
 from autorag_benchmark.pipeline_names import INDEXING_PIPELINE_NAME
 
 logger = logging.getLogger(__name__)
+
+
+def rebase_test_data_document_keys(
+    records: list[dict[str, Any]], *, test_data_key: str, indexed_data_key: str,
+) -> list[dict[str, Any]]:
+    """Point gold document IDs at the corpus indexed for this E2E evaluation."""
+    source_prefix = f"{test_data_key.rsplit('/', 1)[0]}/knowledge_base/"
+    target_prefix = f"{indexed_data_key.rstrip('/')}/"
+
+    def rebase(key: str) -> str:
+        if key.startswith(target_prefix):
+            return key
+        if key.startswith(source_prefix):
+            return target_prefix + key[len(source_prefix):]
+        if "/" not in key:
+            return target_prefix + key
+        raise ValueError(f"Gold document key {key!r} is outside {source_prefix!r}")
+
+    rewritten = []
+    for record in records:
+        item = dict(record)
+        for field in ("correct_answer_document_keys", "correct_answer_document_ids"):
+            if field in item:
+                item[field] = [rebase(key) for key in item[field]]
+        rewritten.append(item)
+    return rewritten
+
+
+def _evaluator_python() -> str:
+    """Select a Python environment with the generated notebook runtime installed."""
+    override = os.environ.get("BENCHMARK_EVALUATOR_PYTHON")
+    if override:
+        return override
+    if importlib.util.find_spec("ai4rag") is not None:
+        return sys.executable
+
+    repository_python = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
+    if repository_python.is_file():
+        probe = subprocess.run(
+            [str(repository_python), "-c", "import importlib.util; assert importlib.util.find_spec('ai4rag')"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if probe.returncode == 0:
+            return str(repository_python)
+    raise RuntimeError(
+        "ai4rag is unavailable in the benchmark and repository Python environments; "
+        "install ai4rag~=0.15.0 or set BENCHMARK_EVALUATOR_PYTHON"
+    )
 
 
 def run_full_corpus_evaluation(
@@ -23,6 +73,7 @@ def run_full_corpus_evaluation(
     config: dict[str, Any],
     bucket: str,
     test_data_key: str,
+    indexed_data_key: str,
     pattern_name: str | None = None,
     timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
@@ -32,10 +83,17 @@ def run_full_corpus_evaluation(
     optional RAGAS dependencies, while a normal benchmark run does not.
     """
     script = Path(__file__).resolve().parent.parent / "scripts" / "evaluate_indexed_rag.py"
+    try:
+        evaluator_python = _evaluator_python()
+    except RuntimeError as exc:
+        logger.error("Full-corpus evaluator unavailable: %s", exc)
+        return {"e2e_error": str(exc)}
+    logger.info("Using evaluator Python: %s", evaluator_python)
     command = [
-        sys.executable, str(script), "--indexing-run-id", indexing_run_id,
+        evaluator_python, str(script), "--indexing-run-id", indexing_run_id,
         "--hpo-run-id", hpo_run_id, "--config", str(config_path),
         "--test-data-key", test_data_key,
+        "--indexed-data-key", indexed_data_key,
     ]
     if env_file:
         command.extend(["--env-file", str(env_file)])

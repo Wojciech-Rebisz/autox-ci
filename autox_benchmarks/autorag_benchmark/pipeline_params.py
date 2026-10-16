@@ -12,6 +12,27 @@ def pipeline_file_for_dataset(dataset: dict[str, Any], settings: BenchmarkSettin
     return settings.pipeline_yaml
 
 
+def indexing_preset_for_dataset(dataset: dict[str, Any], settings: BenchmarkSettings) -> str | None:
+    """Use the HPO quality tier for indexing unless an explicit override is set."""
+    return settings.indexing_preset or dataset.get("preset") or settings.preset or None
+
+
+def align_database_secret_argument(
+    arguments: dict[str, Any], supported_parameters: set[str] | None,
+) -> dict[str, Any]:
+    """Use the database-secret input name declared by a compiled AutoRAG package."""
+    if (
+        supported_parameters is not None
+        and "db_secret_name" in supported_parameters
+        and "vector_db_secret_name" not in supported_parameters
+        and "vector_db_secret_name" in arguments
+    ):
+        aligned = dict(arguments)
+        aligned["db_secret_name"] = aligned.pop("vector_db_secret_name")
+        return aligned
+    return arguments
+
+
 def _merge_manifest_pipeline_overrides(
     arguments: dict[str, Any],
     dataset: dict[str, Any],
@@ -36,9 +57,9 @@ def build_pipeline_arguments(
         "vector_db_secret_name": settings.vector_db_secret_name,
     }
 
-    # The managed optimization pipeline takes a single input_data_key (string).
+    # The optimization pipeline accepts a list; document discovery uses its first key.
     if dataset.get("input_data_key"):
-        args["input_data_key"] = str(dataset["input_data_key"])
+        args["input_data_keys"] = [str(dataset["input_data_key"])]
 
     if "optimization_metric" in dataset:
         args["optimization_metric"] = str(dataset["optimization_metric"])
@@ -53,6 +74,7 @@ def build_pipeline_arguments(
     preset = str(dataset.get("preset", "")).strip() or settings.preset
     if preset:
         args["preset"] = preset
+    args["gpu_acceleration"] = settings.gpu_acceleration
 
     # Model lists are required by the MaaS pipeline: prefer per-dataset overrides,
     # else fall back to the benchmark-wide defaults from settings.

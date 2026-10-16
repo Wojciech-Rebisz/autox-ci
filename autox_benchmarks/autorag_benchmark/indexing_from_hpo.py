@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from autorag_benchmark.pattern_scores import extract_pattern_scores
@@ -26,7 +27,7 @@ def extract_best_pattern_settings(
         {
             "pattern_name": "PatternX",
             "final_score": 0.87,
-            "embedding": {"model_id": "maas-embedding/bge-m3"},
+            "embedding": {"model_id": "publishers/ai-eng-cracow/models/bge-m3"},
             "chunking": {"method": "recursive", "chunk_size": 1024, "chunk_overlap": 0},
             "retrieval": {...},
             "generation": {...},
@@ -87,6 +88,7 @@ def build_indexing_arguments(
     settings: Any,
     *,
     full_input_data_key: str | None = None,
+    preset: str | None = None,
 ) -> dict[str, Any]:
     """Map HPO pattern settings + benchmark config into indexing pipeline arguments.
 
@@ -96,6 +98,8 @@ def build_indexing_arguments(
     """
     embedding = pattern_settings.get("embedding", {})
     chunking = pattern_settings.get("chunking", {})
+    generation = pattern_settings.get("generation", {})
+    language = generation.get("language") or {}
 
     embedding_model_id = embedding.get("model_id", "")
     if not embedding_model_id:
@@ -107,6 +111,10 @@ def build_indexing_arguments(
         "input_data_secret_name": settings.input_data_secret_name,
         "maas_secret_name": settings.maas_secret_name,
         "vector_db_secret_name": settings.vector_db_secret_name,
+        # The compiled pipeline's conditional extraction branch cannot resolve a
+        # null ocr_lang, even though the top-level input is optional. "en"
+        # preserves the extractor's default English/Latin OCR bundle.
+        "ocr_lang": language.get("code") or "en",
     }
 
     # The managed indexing pipeline takes a single input_data_key (string).
@@ -119,6 +127,9 @@ def build_indexing_arguments(
         args["chunk_size"] = int(chunking["chunk_size"])
     if chunking.get("chunk_overlap") is not None:
         args["chunk_overlap"] = int(chunking["chunk_overlap"])
+    if preset:
+        args["preset"] = preset
+    args["gpu_acceleration"] = settings.indexing_gpu_acceleration
 
     logger.info(
         "Built indexing args from pattern %r: embedding=%s, chunking=%s/%s/%s",
@@ -136,16 +147,25 @@ def resolve_indexing_pipeline_target(
     client: Any,
     *,
     kfp_pipeline_name: str = INDEXING_PIPELINE_NAME,
+    package_path: Path | None = None,
 ) -> Any:
     """Resolve a ``PipelineRunTarget`` for the documents-indexing-pipeline.
 
-    Always uses managed mode (the indexing pipeline is DSPA-managed).
+    Uses a supplied package path when set; otherwise uses the DSPA-managed pipeline.
     """
     from benchmark_common.managed_pipelines import (
         PipelineRunTarget,
         get_managed_pipeline_wait_timeout,
         wait_for_managed_pipeline,
     )
+
+    if package_path is not None:
+        return PipelineRunTarget(
+            mode="package",
+            artifact_prefix=kfp_pipeline_name,
+            package_path=str(package_path),
+            kfp_pipeline_name=kfp_pipeline_name,
+        )
 
     if client is None:
         return PipelineRunTarget(

@@ -99,8 +99,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.managed_pipelines and args.package_path:
+        parser.error("--managed-pipelines and --package-path cannot be used together")
     if args.managed_pipelines:
         os.environ["BENCHMARK_USE_MANAGED_PIPELINES"] = "true"
+    elif args.package_path:
+        # An explicit compiled package takes precedence over the config's managed mode.
+        os.environ["BENCHMARK_USE_MANAGED_PIPELINES"] = "false"
 
     if args.run_indexing:
         os.environ["BENCHMARK_RUN_INDEXING"] = "true"

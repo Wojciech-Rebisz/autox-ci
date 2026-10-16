@@ -17,7 +17,7 @@ from autorag_benchmark.indexing_from_hpo import (
 from autorag_benchmark.indexing_report_generator import generate_indexing_report
 from autorag_benchmark.metrics import calculate_scale_drift, extract_profiling_metrics, extract_quality_metrics
 from autorag_benchmark.pattern_scores import extract_pattern_scores_tabular
-from autorag_benchmark.pipeline_params import build_pipeline_arguments
+from autorag_benchmark.pipeline_params import align_database_secret_argument, build_pipeline_arguments, indexing_preset_for_dataset
 from autorag_benchmark.result_rows import (
     base_row_for_dataset,
     completed_row,
@@ -33,10 +33,11 @@ from autorag_benchmark.s3_benchmark_upload import (
     upload_single_dataset_results,
 )
 from autorag_benchmark.settings import BenchmarkSettings, benchmark_settings_from_config
+from autorag_benchmark.terminal_metrics import format_basic_metrics
 from benchmark_common.kfp_client import create_kfp_client
 from benchmark_common.managed_pipelines import PipelineRunTarget
 from benchmark_common.manifest import load_dataset_entries
-from benchmark_common.pipeline_run import extract_run_id, filter_pipeline_arguments, redact_arguments, submit_pipeline_run, wait_for_terminal_run
+from benchmark_common.pipeline_run import extract_run_id, filter_pipeline_arguments, get_pipeline_supported_params, redact_arguments, submit_pipeline_run, wait_for_terminal_run
 from benchmark_common.pipeline_target_resolve import resolve_autorag_pipeline_target
 from benchmark_common.results_csv import write_results_csv
 from benchmark_common.run_state import is_success_state, read_run_state, unwrap_run_from_get_run
@@ -140,6 +141,12 @@ class BenchmarkOrchestrator:
                 continue
 
             if not is_managed and pipeline_file is not None:
+                supported_params = get_pipeline_supported_params(pipeline_file)
+                arguments = align_database_secret_argument(
+                    arguments, supported_params,
+                )
+                if supported_params is not None and "gpu_acceleration" not in supported_params:
+                    arguments.pop("gpu_acceleration", None)
                 arguments = filter_pipeline_arguments(arguments, pipeline_file)
 
             run_name = run_name_for_dataset(settings.run_name_prefix, ds_id)
@@ -234,6 +241,12 @@ class BenchmarkOrchestrator:
                     dataset_rows.append(base_row)
 
                 rows.extend(dataset_rows)
+                scored_patterns = [
+                    row for row in dataset_rows if isinstance(row.get("final_score"), (int, float))
+                ]
+                if scored_patterns:
+                    best_pattern = max(scored_patterns, key=lambda row: row["final_score"])
+                    logger.info("Metrics %s HPO: %s", ds_id, format_basic_metrics("HPO", best_pattern))
 
                 # Upload dataset results to S3 (use first row for metadata, will contain all patterns)
                 upload_row = dataset_rows[0] if dataset_rows else base_row
@@ -270,6 +283,14 @@ class BenchmarkOrchestrator:
                             bucket=bucket,
                         )
                         rows.extend(indexing_rows)
+                        for indexing_result in indexing_rows:
+                            logger.info(
+                                "Metrics %s indexing: %s",
+                                ds_id, format_basic_metrics("indexing", indexing_result),
+                            )
+                            e2e_summary = format_basic_metrics("E2E", indexing_result)
+                            if e2e_summary:
+                                logger.info("Metrics %s E2E: %s", ds_id, e2e_summary)
                     except Exception as idx_exc:
                         logger.exception(
                             "Indexing step failed for dataset %s (HPO run %s)", ds_id, rid,
@@ -364,10 +385,23 @@ class BenchmarkOrchestrator:
                 ds_id, full_key,
             )
         indexing_args = build_indexing_arguments(
-            pattern_settings, settings, full_input_data_key=full_key,
+            pattern_settings,
+            settings,
+            full_input_data_key=full_key,
+            preset=indexing_preset_for_dataset(dataset, settings),
         )
 
-        indexing_target = resolve_indexing_pipeline_target(cfg, client)
+        indexing_target = resolve_indexing_pipeline_target(
+            cfg,
+            client,
+            package_path=settings.indexing_pipeline_yaml,
+        )
+        if indexing_target.mode == "package" and "input_data_key" in indexing_args:
+            indexing_args["input_data_keys"] = [indexing_args.pop("input_data_key")]
+        if indexing_target.mode == "package" and indexing_target.package_path:
+            indexing_args = align_database_secret_argument(
+                indexing_args, get_pipeline_supported_params(indexing_target.package_path),
+            )
 
         indexing_run_name = run_name_for_dataset(
             f"{settings.run_name_prefix}-indexing", ds_id,
@@ -489,6 +523,7 @@ class BenchmarkOrchestrator:
                 config=cfg,
                 bucket=bucket,
                 test_data_key=str(dataset.get("test_data_key") or ""),
+                indexed_data_key=str(dataset.get("full_input_data_key") or dataset.get("input_data_key") or ""),
                 pattern_name=pattern_name,
                 timeout_seconds=settings.indexing_timeout_seconds or settings.timeout_seconds,
             )

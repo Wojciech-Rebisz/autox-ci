@@ -5,24 +5,31 @@ datasets:
     full_input_data_key: "datasets/rag/open_ragbench/arxiv/txt/100/knowledge_base"
     test_data_key: "datasets/rag/open_ragbench/arxiv/txt/10/benchmark_data.json"
     optimization_metric: "faithfulness"
-    # Required by the managed MaaS pipeline (must be IDs served by the endpoint).
     embedding_models:
-      - "maas-embedding/bge-m3"
+      - "publishers/ai-eng-cracow/models/bge-m3"
     generation_models:
-      - "maas-llm/qwen3-8b-fp8-dynamic"
+      - "publishers/ai-eng-cracow/models/qwen3-8b-fp8-dynamic"
 
-  # - id: open-ragbench-arxiv-100-txt
-  #   name: "Open RAGBench ArXiv (100) TXT"
-  #   input_data_key: "datasets/rag/open_ragbench/arxiv/txt/100/knowledge_base"
-  #   full_input_data_key: "datasets/rag/open_ragbench/arxiv/txt/3045/knowledge_base"
-  #   test_data_key: "datasets/rag/open_ragbench/arxiv/txt/100/benchmark_data.json"
-  #   optimization_metric: "faithfulness"
+  - id: open-ragbench-arxiv-100-txt
+    name: "Open RAGBench ArXiv (100) TXT"
+    input_data_key: "datasets/rag/open_ragbench/arxiv/txt/100/knowledge_base"
+    full_input_data_key: "datasets/rag/open_ragbench/arxiv/txt/3045/knowledge_base"
+    test_data_key: "datasets/rag/open_ragbench/arxiv/txt/100/benchmark_data.json"
+    optimization_metric: "faithfulness"
+    embedding_models:
+      - "publishers/ai-eng-cracow/models/bge-m3"
+    generation_models:
+      - "publishers/ai-eng-cracow/models/qwen3-8b-fp8-dynamic"
 
-  # - id: open-ragbench-arxiv-100-md
-  #   name: "Open RAGBench ArXiv (100) MD"
-  #   input_data_key: "datasets/rag/open_ragbench/arxiv/md/100/knowledge_base"
-  #   test_data_key: "datasets/rag/open_ragbench/arxiv/md/100/benchmark_data.json"
-  #   optimization_metric: "faithfulness"
+  - id: open-ragbench-arxiv-100-md
+    name: "Open RAGBench ArXiv (100) MD"
+    input_data_key: "datasets/rag/open_ragbench/arxiv/md/100/knowledge_base"
+    test_data_key: "datasets/rag/open_ragbench/arxiv/md/100/benchmark_data.json"
+    optimization_metric: "faithfulness"
+    embedding_models:
+      - "publishers/ai-eng-cracow/models/bge-m3"
+    generation_models:
+      - "publishers/ai-eng-cracow/models/qwen3-8b-fp8-dynamic"
 
   # - id: open-ragbench-arxiv-100-pdf
   #   name: "Open RAGBench ArXiv (100) PDF"
@@ -30,16 +37,28 @@ datasets:
   #   full_input_data_key: "datasets/rag/open_ragbench/arxiv/pdf/2000/knowledge_base"
   #   test_data_key: "datasets/rag/open_ragbench/arxiv/pdf/100/benchmark_data.json"
   #   optimization_metric: "faithfulness"
+  #   embedding_models:
+  #     - "publishers/ai-eng-cracow/models/bge-m3"
+  #   generation_models:
+  #     - "publishers/ai-eng-cracow/models/qwen3-8b-fp8-dynamic"
 
-  # - id: html-rag-nq-validation-10
-  #   name: "HtmlRag NQ Validation (10) HTML"
-  #   input_data_key: "datasets/rag/html_rag/validation/html/10/knowledge_base"
-  #   full_input_data_key: "datasets/rag/html_rag/validation/html/50/knowledge_base"
-  #   test_data_key: "datasets/rag/html_rag/validation/html/10/benchmark_data.json"
-  #   optimization_metric: "faithfulness"
+  - id: html-rag-nq-validation-10
+    name: "HtmlRag NQ Validation (10) HTML"
+    input_data_key: "datasets/rag/html_rag/validation/html/10/knowledge_base"
+    full_input_data_key: "datasets/rag/html_rag/validation/html/50/knowledge_base"
+    test_data_key: "datasets/rag/html_rag/validation/html/10/benchmark_data.json"
+    optimization_metric: "faithfulness"
+    embedding_models:
+      - "publishers/ai-eng-cracow/models/bge-m3"
+    generation_models:
+      - "publishers/ai-eng-cracow/models/qwen3-8b-fp8-dynamic"
 
-  # - id: html-rag-nq-validation-50
-  #   name: "HtmlRag NQ Validation (50) HTML"
-  #   input_data_key: "datasets/rag/html_rag/validation/html/50/knowledge_base"
-  #   test_data_key: "datasets/rag/html_rag/validation/html/50/benchmark_data.json"
-  #   optimization_metric: "faithfulness"
+  - id: html-rag-nq-validation-50
+    name: "HtmlRag NQ Validation (50) HTML"
+    input_data_key: "datasets/rag/html_rag/validation/html/50/knowledge_base"
+    test_data_key: "datasets/rag/html_rag/validation/html/50/benchmark_data.json"
+    optimization_metric: "faithfulness"
+    embedding_models:
+      - "publishers/ai-eng-cracow/models/bge-m3"
+    generation_models:
+      - "publishers/ai-eng-cracow/models/qwen3-8b-fp8-dynamic"
