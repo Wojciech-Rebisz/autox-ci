@@ -79,11 +79,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="After indexing, evaluate the selected HPO pattern against the full QA set and indexed collection.",
     )
-    parser.add_argument(
-        "--generate-report",
-        action="store_true",
-        help="Write a self-contained HTML indexing and full-corpus quality report next to the CSV.",
-    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument(
         "--package-path",
@@ -113,8 +108,6 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["BENCHMARK_INDEXING_PATTERN_NAME"] = args.pattern_name
     if args.run_e2e_evaluation:
         os.environ["BENCHMARK_RUN_E2E_EVALUATION"] = "true"
-    if args.generate_report:
-        os.environ["BENCHMARK_GENERATE_REPORT"] = "true"
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

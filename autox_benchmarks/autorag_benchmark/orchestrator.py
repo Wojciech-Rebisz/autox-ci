@@ -14,7 +14,6 @@ from autorag_benchmark.indexing_from_hpo import (
     extract_best_pattern_settings,
     resolve_indexing_pipeline_target,
 )
-from autorag_benchmark.indexing_report_generator import generate_indexing_report
 from autorag_benchmark.metrics import calculate_scale_drift, extract_profiling_metrics, extract_quality_metrics
 from autorag_benchmark.pattern_scores import extract_pattern_scores_tabular
 from autorag_benchmark.pipeline_params import align_database_secret_argument, build_pipeline_arguments, indexing_preset_for_dataset
@@ -33,7 +32,6 @@ from autorag_benchmark.s3_benchmark_upload import (
     upload_single_dataset_results,
 )
 from autorag_benchmark.settings import BenchmarkSettings, benchmark_settings_from_config
-from autorag_benchmark.terminal_metrics import format_basic_metrics
 from benchmark_common.kfp_client import create_kfp_client
 from benchmark_common.managed_pipelines import PipelineRunTarget
 from benchmark_common.manifest import load_dataset_entries
@@ -241,13 +239,6 @@ class BenchmarkOrchestrator:
                     dataset_rows.append(base_row)
 
                 rows.extend(dataset_rows)
-                scored_patterns = [
-                    row for row in dataset_rows if isinstance(row.get("final_score"), (int, float))
-                ]
-                if scored_patterns:
-                    best_pattern = max(scored_patterns, key=lambda row: row["final_score"])
-                    logger.info("Metrics %s HPO: %s", ds_id, format_basic_metrics("HPO", best_pattern))
-
                 # Upload dataset results to S3 (use first row for metadata, will contain all patterns)
                 upload_row = dataset_rows[0] if dataset_rows else base_row
                 upload_single_dataset_results(
@@ -283,14 +274,6 @@ class BenchmarkOrchestrator:
                             bucket=bucket,
                         )
                         rows.extend(indexing_rows)
-                        for indexing_result in indexing_rows:
-                            logger.info(
-                                "Metrics %s indexing: %s",
-                                ds_id, format_basic_metrics("indexing", indexing_result),
-                            )
-                            e2e_summary = format_basic_metrics("E2E", indexing_result)
-                            if e2e_summary:
-                                logger.info("Metrics %s E2E: %s", ds_id, e2e_summary)
                     except Exception as idx_exc:
                         logger.exception(
                             "Indexing step failed for dataset %s (HPO run %s)", ds_id, rid,
@@ -332,15 +315,6 @@ class BenchmarkOrchestrator:
 
         write_results_csv(rows, output_csv)
         logger.info("Wrote %d row(s) to %s", len(rows), output_csv)
-        if settings.generate_report:
-            # The HTML report is a nice-to-have; never let it block the S3 upload.
-            report_path = output_csv.with_name(f"{output_csv.stem}_indexing_report.html")
-            try:
-                generate_indexing_report(rows, report_path)
-                logger.info("Wrote indexing report to %s", report_path)
-            except Exception as exc:
-                logger.warning("Could not write indexing report: %s", exc)
-
         upload_batch_aggregated(
             s3_cfg=s3_cfg,
             bucket=bucket,
@@ -495,8 +469,7 @@ class BenchmarkOrchestrator:
 
         report_flat: dict[str, Any] = {}
         if is_success_state(indexing_state):
-            # extract_profiling_metrics already flattens indexing_report.json, so we
-            # do not call extract_indexing_report separately (avoids a duplicate read).
+            # Profiling includes the indexing report and related pipeline artifacts.
             try:
                 report_flat = extract_profiling_metrics(
                     indexing_run_id, cfg, bucket, indexing_wall_time=wall_time,

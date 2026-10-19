@@ -10,7 +10,6 @@ from autorag_benchmark.indexing_report import flatten_report, store_binding_from
 from autorag_benchmark.metrics.quality_metrics import aggregate_evaluation_results
 from autorag_benchmark.metrics.scale_drift import calculate_scale_drift
 from autorag_benchmark.pipeline_params import align_database_secret_argument, build_pipeline_arguments, indexing_preset_for_dataset
-from autorag_benchmark.terminal_metrics import format_basic_metrics
 
 
 def _settings(**overrides: object) -> SimpleNamespace:
@@ -145,21 +144,6 @@ def test_aggregate_evaluation_results_groups_judge_metrics() -> None:
     rows = [{"answer": "", "metrics": [{"name": "faithfulness", "evaluator": "unitxt", "score": 1.0}]}]
     out = aggregate_evaluation_results(rows, prefix="e2e_")
     assert out["e2e_unitxt_faithfulness_mean"] == 1.0
-
-
-def test_terminal_metrics_format_available_scores() -> None:
-    assert format_basic_metrics("HPO", {
-        "pattern_name": "Pattern1", "final_score": 0.7234,
-        "mean_faithfulness": 0.7234,
-    }) == "pattern=Pattern1, score=0.723, faithfulness=0.723"
-    assert format_basic_metrics("indexing", {
-        "indexing_state": "SUCCEEDED", "indexing_total_documents": 89.0,
-        "indexing_total_chunks": 5309,
-    }) == "state=SUCCEEDED, documents=89, chunks=5309"
-    assert format_basic_metrics("E2E", {
-        "e2e_question_count": 10, "e2e_answer_token_f1_mean": 0.395986,
-        "e2e_ragas_answer_relevancy_mean": 0.94029,
-    }) == "questions=10, token_f1=0.396, ragas_answer_relevancy=0.940"
 
 
 def test_aggregate_evaluation_results_handles_unsupported_schema() -> None:

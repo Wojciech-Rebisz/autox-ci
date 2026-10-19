@@ -71,18 +71,24 @@ def resolve_dataset_upload_bucket(
 
 def resolve_dataset_upload_bucket_from_env(env_file: Path | None = None, explicit: str | None = None) -> str:
     """Resolve upload bucket for generate_rag_datasets (CLI / partial .env)."""
-    from benchmark_common.credentials import credentials_dict_from_env, load_benchmark_dotenv
-
-    path = load_benchmark_dotenv(env_file)
-    if env_file is not None and path is None:
-        raise FileNotFoundError(f".env file not found: {env_file.expanduser().resolve()}")
-
     resolved = _explicit_bucket(explicit)
     if resolved:
         return resolved
+
+    bucket = _bucket_from_storage(
+        {},
+        "input_data_bucket_name",
+        ("BENCHMARK_INPUT_DATA_BUCKET_NAME", "INPUT_DATA_BUCKET_NAME"),
+    )
+    if bucket:
+        return bucket
+
     try:
-        return resolve_dataset_upload_bucket(credentials_dict_from_env())
-    except ValueError:
+        from benchmark_common.credentials import load_credentials_overlay
+
+        overlay, _ = load_credentials_overlay(env_file=env_file)
+        return resolve_dataset_upload_bucket(overlay)
+    except (FileNotFoundError, ValueError):
         pass
 
     raise ValueError(

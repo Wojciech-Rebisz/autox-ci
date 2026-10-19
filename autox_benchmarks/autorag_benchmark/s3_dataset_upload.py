@@ -11,7 +11,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "autox_tests" / "lib"))
 from s3_data import upload_file_to_s3, upload_tree_to_s3_prefix, ensure_s3_bucket_exists  # noqa: E402
 
-from benchmark_common.credentials import credentials_dict_from_env, load_benchmark_dotenv  # noqa: E402
+from benchmark_common.credentials import load_credentials_overlay  # noqa: E402
 
 
 def _s3_section_to_boto_config(s3_section: dict[str, Any]) -> dict[str, Any] | None:
@@ -32,11 +32,11 @@ def _s3_section_to_boto_config(s3_section: dict[str, Any]) -> dict[str, Any] | N
 
 def get_s3_boto_config(env_file: Path | None = None) -> dict[str, Any] | None:
     """Read S3 configuration from .env (or shell environment)."""
-    path = load_benchmark_dotenv(env_file)
-    if env_file is not None and path is None:
-        raise FileNotFoundError(f".env file not found: {env_file.expanduser().resolve()}")
-    overlay = credentials_dict_from_env()
-    return _s3_section_to_boto_config(overlay.get("s3") or {})
+    try:
+        overlay, _ = load_credentials_overlay(env_file=env_file)
+        return _s3_section_to_boto_config(overlay.get("s3") or {})
+    except (FileNotFoundError, ValueError):
+        return get_s3_boto_config_from_env()
 
 
 def get_s3_boto_config_from_env() -> dict[str, Any] | None:

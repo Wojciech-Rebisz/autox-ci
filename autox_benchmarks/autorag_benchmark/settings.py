@@ -56,7 +56,6 @@ class BenchmarkSettings:
     indexing_pattern_name: str = ""
     indexing_timeout_seconds: float = 0.0
     run_e2e_evaluation: bool = False
-    generate_report: bool = False
 
 
 def benchmark_settings_from_config(cfg: dict[str, Any], config_dir: Path) -> BenchmarkSettings:
@@ -164,5 +163,4 @@ def benchmark_settings_from_config(cfg: dict[str, Any], config_dir: Path) -> Ben
             run_cfg.get("indexing_timeout_seconds", run_cfg.get("timeout_seconds", 86400))
         ),
         run_e2e_evaluation=_resolve_bool("BENCHMARK_RUN_E2E_EVALUATION", run_cfg.get("run_e2e_evaluation", False)),
-        generate_report=_resolve_bool("BENCHMARK_GENERATE_REPORT", run_cfg.get("generate_report", False)),
     )

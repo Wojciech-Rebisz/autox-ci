@@ -2,50 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import logging
 import math
 import statistics
 from typing import Any
 
-from autorag_benchmark.pipeline_names import INDEXING_PIPELINE_NAME
-
-logger = logging.getLogger(__name__)
-
-
-def extract_indexing_report(
-    run_id: str,
-    config: dict[str, Any],
-    bucket: str,
-    *,
-    pipeline_name: str = INDEXING_PIPELINE_NAME,
-) -> dict[str, Any]:
-    """Download and parse the indexing report from S3.
-
-    Returns a flat dict suitable for merging into a CSV row, with keys prefixed
-    by ``indexing_``.  Returns ``{"indexing_error": "..."}`` on failure.
-    """
-    from autorag_benchmark.pattern_scores import create_s3_client
-
-    try:
-        s3_client = create_s3_client(config)
-    except Exception as e:
-        logger.warning("Could not create S3 client: %s", e)
-        return {"indexing_error": f"S3 client creation failed: {e}"}
-
-    prefix = f"{pipeline_name}/{run_id}/"
-    report_key = find_indexing_report_key(s3_client, bucket, prefix)
-    if not report_key:
-        return {"indexing_error": f"indexing_report.json not found under s3://{bucket}/{prefix}"}
-
-    try:
-        response = s3_client.get_object(Bucket=bucket, Key=report_key)
-        report = json.loads(response["Body"].read())
-    except Exception as e:
-        logger.error("Error reading indexing report %s: %s", report_key, e)
-        return {"indexing_error": str(e)}
-
-    return flatten_report(report)
 
 
 def find_indexing_report_key(s3_client: Any, bucket: str, prefix: str) -> str | None:

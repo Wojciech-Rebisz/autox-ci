@@ -2,7 +2,6 @@
 
 import json
 import re
-import urllib.request
 from pathlib import Path
 
 from autorag_benchmark.datasets import register
@@ -11,27 +10,6 @@ from autorag_benchmark.datasets.document_formats import save_document, get_file_
 # Constants
 OPEN_RAGBENCH_REPO_ID = "vectara/open_ragbench"
 OPEN_RAGBENCH_SUBSET = "pdf/arxiv"
-
-
-def _download_pdf(url: str, output_path: Path) -> bool:
-    """Download one native PDF, reusing a valid file from an earlier attempt."""
-    if output_path.is_file():
-        with output_path.open("rb") as existing:
-            if existing.read(4) == b"%PDF":
-                return True
-    output_path.unlink(missing_ok=True)
-    try:
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(request, timeout=60) as response:
-            data = response.read()
-        if not data.startswith(b"%PDF"):
-            raise ValueError("response is not a PDF")
-        output_path.write_bytes(data)
-        return True
-    except Exception as exc:
-        print(f"  Skipped {output_path.name}: PDF download error - {exc}")
-        output_path.unlink(missing_ok=True)
-        return False
 
 
 def extract_text_only(corpus_data: dict) -> str:
@@ -80,7 +58,6 @@ def prepare(
     num_samples: int = 50,
     repo_id: str | None = None,
     output_format: str = "txt",
-    include_all_pdfs: bool = False,
     **_: object,
 ) -> tuple[int, int]:
     """Download Open RAGBench and write kb_dir + bench_path. Returns (num_docs, num_entries).
@@ -92,8 +69,6 @@ def prepare(
         repo_id: HuggingFace repository ID
         output_format: Output format for documents - "txt", "md", or "pdf" (default: "txt")
                       Note: "pdf" downloads native ArXiv PDFs, "txt"/"md" extract text from JSON
-        include_all_pdfs: Add all source PDF URLs, including hard negatives not
-                          referenced by questions. Requires PDF format.
 
     Returns:
         (number of documents written, number of benchmark entries)
@@ -102,8 +77,6 @@ def prepare(
 
     if repo_id is None:
         repo_id = OPEN_RAGBENCH_REPO_ID
-    if include_all_pdfs and output_format != "pdf":
-        raise ValueError("include_all_pdfs requires output_format='pdf'")
     prefix = f"{OPEN_RAGBENCH_SUBSET}/"
     queries_path = f"{prefix}queries.json"
     answers_path = f"{prefix}answers.json"
@@ -133,9 +106,9 @@ def prepare(
     use_native_pdf = (output_format == "pdf")
 
     if use_native_pdf:
-        print("Processing Open RAGBench dataset (downloading native PDFs from ArXiv)...")
+        print(f"Processing Open RAGBench dataset (downloading native PDFs from ArXiv)...")
     else:
-        print("Processing Open RAGBench dataset (extracting text, excluding images/encodings)...")
+        print(f"Processing Open RAGBench dataset (extracting text, excluding images/encodings)...")
 
     for query_uuid, query_info in queries.items():
         if processed >= num_samples:
@@ -161,12 +134,51 @@ def prepare(
 
         # Handle native PDF download vs text extraction
         if use_native_pdf:
+            # Download native PDF from ArXiv
             if doc_id not in pdf_urls:
                 skipped_no_text += 1
                 print(f"  Skipped {doc_id}: PDF URL not found")
                 continue
-            if not _download_pdf(pdf_urls[doc_id], output_path):
+
+            pdf_url = pdf_urls[doc_id]
+            try:
+                print(f"  Downloading PDF: {doc_id} from {pdf_url}")
+
+                # Try using requests library first (better SSL handling)
+                try:
+                    import requests
+                    response = requests.get(pdf_url, timeout=30)
+                    response.raise_for_status()
+                    output_path.write_bytes(response.content)
+                except ImportError:
+                    # Fallback to urllib with SSL context
+                    import ssl
+                    import urllib.request
+
+                    # Create SSL context that uses system certificates
+                    ssl_context = ssl.create_default_context()
+                    # Note: If you're still having SSL issues, you can disable verification
+                    # (not recommended for production):
+                    # ssl_context.check_hostname = False
+                    # ssl_context.verify_mode = ssl.CERT_NONE
+
+                    req = urllib.request.Request(pdf_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req, context=ssl_context, timeout=30) as response:
+                        output_path.write_bytes(response.read())
+
+                # Verify the PDF was downloaded
+                if not output_path.exists() or output_path.stat().st_size == 0:
+                    skipped_no_text += 1
+                    print(f"  Skipped {doc_id}: PDF download failed (empty file)")
+                    if output_path.exists():
+                        output_path.unlink()
+                    continue
+
+            except Exception as e:
                 skipped_no_text += 1
+                print(f"  Skipped {doc_id}: PDF download error - {e}")
+                if output_path.exists():
+                    output_path.unlink()
                 continue
         else:
             # Extract text from JSON corpus
@@ -208,20 +220,15 @@ def prepare(
         if processed % 10 == 0:
             print(f"  Processed {processed}/{num_samples} documents (skipped {skipped_no_text} with no text)...")
 
-    if include_all_pdfs:
-        for doc_id, url in pdf_urls.items():
-            output_path = kb_dir / f"open_ragbench_{doc_id}.pdf"
-            _download_pdf(url, output_path)
-
     bench_path.parent.mkdir(parents=True, exist_ok=True)
     with open(bench_path, "w", encoding="utf-8") as f:
         json.dump(benchmark_data, f, indent=4)
 
-    print("\nOpen RAGBench generation complete:")
-    print(f"  Documents created: {len(list(kb_dir.iterdir()))}")
+    print(f"\nOpen RAGBench generation complete:")
+    print(f"  Documents created: {len(benchmark_data)}")
     print(f"  Documents skipped: {skipped_no_text}")
     if use_native_pdf:
-        print("  Format: Native PDFs downloaded from ArXiv")
+        print(f"  Format: Native PDFs downloaded from ArXiv")
     else:
         print(f"  Format: {output_format} (text extracted, images/encodings filtered out)")
 
