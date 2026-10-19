@@ -9,6 +9,7 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from kubernetes import client as k8s_client
@@ -39,12 +40,12 @@ class _BatchApi:
         ("docling", ["s3", "maas", "vector", "pip", "docling"]),
     ],
 )
-def test_notebook_job_only_injects_docling_for_disconnected_autorag(
+def test_notebook_job_injects_docling_secret_only_when_configured(
     monkeypatch: pytest.MonkeyPatch,
     docling_secret_name: str | None,
     expected_secrets: list[str],
 ) -> None:
-    """Connected and AutoML Jobs never require the optional Docling Secret."""
+    """Either cluster mode can use the optional Docling artifacts Secret."""
     batch_api = _BatchApi()
     monkeypatch.setenv("RHOAI_NOTEBOOK_RUNNER_IMAGE", "example.invalid/notebook:latest")
     monkeypatch.setenv("RHOAI_NOTEBOOK_PIP_SECRET_NAME", "pip")
@@ -207,11 +208,13 @@ def test_notebook_environment_filter_preserves_non_code_cells(filter_notebook_ce
 
 @pytest.mark.parametrize("disconnected", [False, True])
 @pytest.mark.parametrize("inject_mock_input", [False, True])
-def test_notebook_job_filters_tags_using_docling_path(
+@pytest.mark.parametrize("artifact_source", ["none", "image", "s3"])
+def test_notebook_job_filters_tags_using_explicit_cluster_mode(
     monkeypatch,
     tmp_path,
     disconnected,
     inject_mock_input,
+    artifact_source,
 ):
     """Run the embedded Job program with local S3 and notebook execution substitutes."""
     monkeypatch.setattr(os, "environ", os.environ.copy())
@@ -296,20 +299,83 @@ def test_notebook_job_filters_tags_using_docling_path(
         "DOCLING_ARTIFACTS_S3_PREFIX",
     ):
         monkeypatch.delenv(name, raising=False)
-    if disconnected:
+    if artifact_source != "none":
         monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", str(tmp_path / "models"))
+    if artifact_source == "s3":
         monkeypatch.setenv("DOCLING_ARTIFACTS_S3_BUCKET", "models-bucket")
         monkeypatch.setenv("DOCLING_ARTIFACTS_S3_PREFIX", "models/")
     monkeypatch.setenv("NOTEBOOK_RUNNER_IMAGE", "example.invalid/notebook:latest")
     monkeypatch.setenv("NOTEBOOK_S3_BUCKET", "notebooks-bucket")
     monkeypatch.setenv("NOTEBOOK_S3_KEYS", json.dumps(["indexing.ipynb"]))
     monkeypatch.setenv("NOTEBOOK_INJECT_MOCK_INPUT", str(inject_mock_input).lower())
+    monkeypatch.setenv(
+        "NOTEBOOK_CLUSTER_MODE", "disconnected" if disconnected else "connected"
+    )
 
     exec(compile(notebooks._NOTEBOOK_JOB_PROGRAM, "notebook-runner", "exec"), {})
 
     assert executed == ["shared", "offline" if disconnected else "online"]
     assert ("notebooks-bucket", "indexing.ipynb") in downloaded
-    assert (("models-bucket", "models/model.bin") in downloaded) == disconnected
+    assert (("models-bucket", "models/model.bin") in downloaded) == (
+        artifact_source == "s3"
+    )
+
+
+@pytest.mark.parametrize(
+    ("configured_mode", "expected_mode"),
+    [
+        (None, "connected"),
+        ("connected", "connected"),
+        ("disconnected", "disconnected"),
+        (" DISCONNECTED ", "disconnected"),
+    ],
+)
+def test_notebook_job_passes_cluster_mode(monkeypatch, configured_mode, expected_mode):
+    """The explicit mode reaches the pod independently of model secrets."""
+    batch_api = _BatchApi()
+    monkeypatch.setenv("RHOAI_NOTEBOOK_RUNNER_IMAGE", "example.invalid/notebook:latest")
+    monkeypatch.setenv("RHOAI_NOTEBOOK_DOCLING_SECRET_NAME", "models")
+    if configured_mode is None:
+        monkeypatch.delenv("RHOAI_NOTEBOOK_CLUSTER_MODE", raising=False)
+    else:
+        monkeypatch.setenv("RHOAI_NOTEBOOK_CLUSTER_MODE", configured_mode)
+    monkeypatch.setattr(
+        notebooks,
+        "make_k8s_core_api_from_config",
+        lambda config: SimpleNamespace(api_client=object()),
+    )
+    monkeypatch.setattr(k8s_client, "BatchV1Api", lambda *args, **kwargs: batch_api)
+    notebooks.run_notebooks_as_k8s_job(
+        bucket="artifacts",
+        notebook_keys=["indexing.ipynb"],
+        config={"rhoai_project": "test-project"},
+        secret_names=[],
+    )
+    env = {
+        variable.name: variable.value
+        for variable in batch_api.job.spec.template.spec.containers[0].env
+    }
+    assert env["NOTEBOOK_CLUSTER_MODE"] == expected_mode
+
+
+@pytest.mark.parametrize("mode", ["invalid", "auto", ""])
+def test_notebook_job_rejects_invalid_cluster_mode(monkeypatch, mode):
+    """Typos fail before contacting Kubernetes rather than selecting unintended cells."""
+    monkeypatch.setenv("RHOAI_NOTEBOOK_RUNNER_IMAGE", "example.invalid/notebook:latest")
+    monkeypatch.setenv("RHOAI_NOTEBOOK_CLUSTER_MODE", mode)
+    make_api = Mock()
+    monkeypatch.setattr(notebooks, "make_k8s_core_api_from_config", make_api)
+    with pytest.raises(
+        ValueError,
+        match="RHOAI_NOTEBOOK_CLUSTER_MODE must be connected or disconnected",
+    ):
+        notebooks.run_notebooks_as_k8s_job(
+            bucket="artifacts",
+            notebook_keys=["indexing.ipynb"],
+            config={"rhoai_project": "test-project"},
+            secret_names=[],
+        )
+    make_api.assert_not_called()
 
 
 def test_notebook_job_passes_pip_index_url(monkeypatch: pytest.MonkeyPatch) -> None:
