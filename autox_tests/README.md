@@ -176,6 +176,17 @@ Set `run_notebook` to `true` to execute the selected model notebook in a Kuberne
 | `RHOAI_NOTEBOOK_KERNEL_NAME` | `python3` | Registered kernel used when a notebook has no kernelspec. |
 | `S3_SSL_VERIFY` | `true` | Verify S3 TLS in the test process and notebook Job. Set to `false` only for a trusted development endpoint with a self-signed certificate. |
 
+Notebook code cells can declare an environment in standard Jupyter metadata:
+`"metadata": {"tags": ["disconnected"]}` or `"metadata": {"tags": ["connected"]}`.
+The runner treats a nonempty `DOCLING_ARTIFACTS_PATH` as disconnected mode and
+otherwise uses connected mode. It replaces cells tagged for the other environment
+with no-ops before Papermill execution. Untagged cells and cells with unrelated tags
+run in either mode. Environment tags are case-insensitive; a code cell carrying both
+tags is an error. Markdown headings do not control execution.
+
+Use freshly generated notebooks from an ai4rag version that includes these tags.
+Older untagged offline setup and validation cells will execute in either mode.
+
 The test service account needs namespace-scoped permissions to create, read, list, and delete `batch/jobs`; read/list Pods; read `pods/log`; and read the referenced Secrets. Cluster-admin access is not required; the standard namespace `edit` role is normally sufficient.
 
 #### Model serving (optional)

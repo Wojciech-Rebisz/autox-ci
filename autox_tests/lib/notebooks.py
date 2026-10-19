@@ -100,37 +100,27 @@ def _print_notebook_failure_diagnostics(notebook_key, output_path, error):
     print("===== END NOTEBOOK EXECUTION DIAGNOSTICS =====", flush=True)
 
 
-def _exclude_code_cells_before_next_markdown_after_sections(notebook, section_titles):
-    # Replace code cells in each named Markdown section with no-ops.
-    titles = {title.strip().lower() for title in section_titles}
-    active_title = None
-
-    for cell in notebook.cells:
-        if cell.get("cell_type") == "markdown":
-            active_title = None
-            for line in cell.get("source", "").splitlines():
-                heading = line.strip()
-                if not heading.startswith("#"):
-                    continue
-                title = heading.lstrip("#").strip().lower()
-                if title in titles:
-                    active_title = title
-                break
+def _exclude_code_cells_for_environment(notebook, *, disconnected):
+    # Untagged cells are shared; environment tags apply only to their own cell.
+    environment = "disconnected" if disconnected else "connected"
+    for index, cell in enumerate(notebook.cells):
+        if cell.get("cell_type") != "code":
             continue
-
-        if cell.get("cell_type") != "code" or active_title is None:
+        tags = {tag.strip().lower() for tag in cell.get("metadata", {}).get("tags", [])}
+        environment_tags = tags & {"connected", "disconnected"}
+        if len(environment_tags) > 1:
+            raise ValueError(f"Code cell {index} has both connected and disconnected tags")
+        if not environment_tags or environment in environment_tags:
             continue
 
         cell["source"] = "# Skipped by the AutoX notebook runner.\npass\n"
+        cell["execution_count"] = None
+        cell["outputs"] = []
         print(
-            "Skipping code cell under section: " + active_title,
+            f"Skipping code cell {index} tagged {next(iter(environment_tags))!r} "
+            f"in {environment} environment",
             flush=True,
         )
-
-
-_DISCONNECTED_ONLY_NOTEBOOK_SECTIONS = (
-    "Validate Offline Configuration",
-)
 
 
 docling_prefix = os.environ.get("DOCLING_ARTIFACTS_S3_PREFIX", "").strip().lstrip("/")
@@ -166,24 +156,15 @@ for index, notebook_key in enumerate(json.loads(os.environ["NOTEBOOK_S3_KEYS"]))
     output_path = workdir / "output.ipynb"
     s3.download_file(os.environ["NOTEBOOK_S3_BUCKET"], notebook_key, str(input_path))
 
+    with input_path.open(encoding="utf-8") as f:
+        notebook = nbformat.read(f, as_version=4)
     if os.environ.get("NOTEBOOK_INJECT_MOCK_INPUT", "false").lower() == "true":
-        with input_path.open(encoding="utf-8") as f:
-            notebook = nbformat.read(f, as_version=4)
         notebook.cells.insert(0, nbformat.v4.new_code_cell('def input(prompt=""):\n    return "Sample query?"'))
-        with input_path.open("w", encoding="utf-8") as f:
-            nbformat.write(notebook, f)
 
-    # DOCLING_ARTIFACTS_PATH is required by the generated notebook for
-    # disconnected clusters. Preserve the offline setup and validation cells
-    # whenever that disconnected-cluster signal is present.
-    if not docling_path:
-        with input_path.open(encoding="utf-8") as f:
-            notebook = nbformat.read(f, as_version=4)
-        _exclude_code_cells_before_next_markdown_after_sections(
-            notebook, _DISCONNECTED_ONLY_NOTEBOOK_SECTIONS
-        )
-        with input_path.open("w", encoding="utf-8") as f:
-            nbformat.write(notebook, f)
+    # Keep the existing Docling-path signal for disconnected notebook execution.
+    _exclude_code_cells_for_environment(notebook, disconnected=bool(docling_path))
+    with input_path.open("w", encoding="utf-8") as f:
+        nbformat.write(notebook, f)
 
     try:
         pm.execute_notebook(
