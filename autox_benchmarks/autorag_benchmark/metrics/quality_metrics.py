@@ -22,10 +22,10 @@ def extract_quality_metrics(hpo_run_id: str, config: dict[str, Any], bucket: str
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=root):
         keys.extend(obj["Key"] for obj in page.get("Contents", []) if obj["Key"].endswith("evaluation_results.json"))
     if pattern_name:
-        selected = [key for key in keys if f"/rag_patterns/{pattern_name}/" in key]
-        keys = selected or keys
+        keys = [key for key in keys if f"/rag_patterns/{pattern_name}/" in key]
     if not keys:
-        return {f"{prefix}quality_note": "evaluation_results.json not found"}
+        detail = f" for pattern {pattern_name}" if pattern_name else ""
+        return {f"{prefix}quality_note": f"evaluation_results.json not found{detail}"}
     response = client.get_object(Bucket=bucket, Key=sorted(keys)[0])
     return aggregate_evaluation_results(json.loads(response["Body"].read()), prefix=prefix)
 
@@ -70,9 +70,11 @@ def aggregate_evaluation_results(data: Any, *, prefix: str = "e2e_") -> dict[str
             retrieved = [_document_key(context.get("document_id") or context.get("document_key") or context.get("source")) for context in contexts if isinstance(context, dict)]
             retrieved = [value for value in retrieved if value]
             if expected:
-                matches = [index for index, value in enumerate(retrieved, start=1) if value in expected]
+                matches = [index for index, value in enumerate(retrieved, start=1) if any(_same_document(value, gold) for gold in expected)]
                 retrieval_hits.append(float(bool(matches)))
-                retrieval_recalls.append(len(set(retrieved) & expected) / len(expected))
+                retrieval_recalls.append(
+                    sum(any(_same_document(value, gold) for value in retrieved) for gold in expected) / len(expected)
+                )
                 retrieval_precisions.append(len(matches) / len(retrieved) if retrieved else 0.0)
                 reciprocal_ranks.append(1 / matches[0] if matches else 0.0)
     flat: dict[str, Any] = {f"{prefix}question_count": len(entries)}
@@ -125,7 +127,13 @@ def _safe_name(value: str) -> str:
 
 
 def _document_key(value: Any) -> str:
-    """Compare document IDs robustly across S3 key and filename representations."""
+    """Keep path identity when available while normalizing surrounding slashes."""
     if not isinstance(value, str):
         return ""
-    return value.rstrip("/").rsplit("/", 1)[-1]
+    return value.strip("/")
+
+
+def _same_document(retrieved: str, gold: str) -> bool:
+    if "/" in retrieved and "/" in gold:
+        return retrieved == gold
+    return retrieved.rsplit("/", 1)[-1] == gold.rsplit("/", 1)[-1]

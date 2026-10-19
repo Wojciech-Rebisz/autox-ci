@@ -106,6 +106,9 @@ def indexing_row(
     pattern_score: float | None = None,
     input_data_key_hpo: str = "",
     input_data_key_indexing: str = "",
+    indexing_run_name: str = "",
+    indexing_started_at: str = "",
+    indexing_finished_at: str = "",
     indexing_report: dict[str, Any] | None = None,
     e2e_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -119,6 +122,9 @@ def indexing_row(
         "indexing_pattern_score": pattern_score,
         "input_data_key_hpo": input_data_key_hpo,
         "input_data_key_indexing": input_data_key_indexing,
+        "indexing_run_name": indexing_run_name,
+        "indexing_started_at": indexing_started_at,
+        "indexing_finished_at": indexing_finished_at,
     }
     if indexing_report:
         row.update(indexing_report)

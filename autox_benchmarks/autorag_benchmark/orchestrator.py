@@ -16,6 +16,7 @@ from autorag_benchmark.indexing_from_hpo import (
 )
 from autorag_benchmark.metrics import calculate_scale_drift, extract_profiling_metrics, extract_quality_metrics
 from autorag_benchmark.pattern_scores import extract_pattern_scores_tabular
+from autorag_benchmark.pipeline_names import INDEXING_PIPELINE_NAME
 from autorag_benchmark.pipeline_params import align_database_secret_argument, build_pipeline_arguments, indexing_preset_for_dataset
 from autorag_benchmark.result_rows import (
     base_row_for_dataset,
@@ -27,7 +28,6 @@ from autorag_benchmark.result_rows import (
     timeout_row,
 )
 from autorag_benchmark.s3_benchmark_upload import (
-    build_batch_id,
     upload_batch_aggregated,
     upload_single_dataset_results,
 )
@@ -40,6 +40,7 @@ from benchmark_common.pipeline_target_resolve import resolve_autorag_pipeline_ta
 from benchmark_common.results_csv import write_results_csv
 from benchmark_common.run_state import is_success_state, read_run_state, unwrap_run_from_get_run
 from benchmark_common.run_timing import duration_seconds, parse_timestamp
+from benchmark_common.s3_upload import build_batch_id
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,16 @@ def _validate_dataset_entry(ds: dict[str, Any], ds_id: str) -> str | None:
     return None
 
 
+def _indexing_stage_succeeded(row: dict[str, Any], *, evaluate: bool) -> bool:
+    if not is_success_state(str(row.get("indexing_state", ""))):
+        return False
+    return not evaluate or (
+        bool(row.get("e2e_question_count")) and not (row.get("e2e_error") or row.get("e2e_note"))
+    )
+
+
 class BenchmarkOrchestrator:
-    """High-level RAG benchmark run: one pipeline run per dataset entry, then aggregate CSV."""
+    """Run HPO and optional full-corpus indexing for each dataset, then write results."""
 
     def __init__(self, config_path: Path, env_file: Path | None = None) -> None:
         self.config_path = config_path.resolve()
@@ -96,6 +105,10 @@ class BenchmarkOrchestrator:
             logger.error("%s", e)
             return 1
 
+        if settings.run_e2e_evaluation and not settings.run_indexing:
+            logger.error("Full-corpus evaluation requires run_indexing=true")
+            return 1
+
         is_managed = settings.pipeline_mode == "managed"
 
         # S3 upload preparation
@@ -115,6 +128,7 @@ class BenchmarkOrchestrator:
             logger.info("Benchmark batch_id=%s (results will upload to s3://%s/%s/)", batch_id, bucket, settings.benchmark_s3_prefix)
 
         rows: list[dict[str, Any]] = []
+        stage_failed = False
         pipeline_file = Path(target.package_path) if target.package_path else None
 
         for i, ds in enumerate(datasets):
@@ -258,13 +272,21 @@ class BenchmarkOrchestrator:
                 )
 
                 # ── Step 2: HPO -> Indexing -> E2E evaluation ──
-                if (
-                    is_success_state(str(state))
-                    and settings.run_indexing
-                    and not dry_run
-                ):
+                if is_success_state(str(state)) and settings.run_indexing:
+                    if not ds.get("full_input_data_key"):
+                        message = f"Dataset {ds_id} has no full_input_data_key; full-corpus indexing skipped"
+                        logger.error("%s", message)
+                        rows.append(indexing_row(
+                            base, rid, "", "SKIPPED", "",
+                            input_data_key_hpo=ds.get("input_data_key", ""),
+                            indexing_report={"indexing_error": message},
+                        ))
+                        stage_failed = True
+                        if fail_fast:
+                            break
+                        continue
                     try:
-                        indexing_rows = self._run_indexing_from_hpo(
+                        indexing_rows, indexing_arguments = self._run_indexing_from_hpo(
                             cfg=cfg,
                             settings=settings,
                             client=client,
@@ -273,16 +295,39 @@ class BenchmarkOrchestrator:
                             base_row=base,
                             bucket=bucket,
                         )
-                        rows.extend(indexing_rows)
                     except Exception as idx_exc:
                         logger.exception(
                             "Indexing step failed for dataset %s (HPO run %s)", ds_id, rid,
                         )
-                        rows.append(indexing_row(
+                        indexing_rows = [indexing_row(
                             base, rid, "", "ERROR", "",
                             input_data_key_hpo=ds.get("input_data_key", ""),
                             indexing_report={"indexing_error": str(idx_exc)},
-                        ))
+                        )]
+                        indexing_arguments = {}
+                    rows.extend(indexing_rows)
+                    for indexing_result in indexing_rows:
+                        if indexing_result.get("indexing_run_id"):
+                            upload_single_dataset_results(
+                                s3_cfg=s3_cfg,
+                                bucket=bucket,
+                                settings=settings,
+                                cfg=cfg,
+                                batch_id=batch_id,
+                                dataset=ds,
+                                row=indexing_result,
+                                pipeline_yaml_path=settings.indexing_pipeline_yaml,
+                                kfp_pipeline_name=INDEXING_PIPELINE_NAME,
+                                arguments=indexing_arguments,
+                                dataset_filter=dataset_filter,
+                                fail_fast=fail_fast,
+                                repo_root=repo_root,
+                                stage="full_index",
+                            )
+                        if not _indexing_stage_succeeded(indexing_result, evaluate=settings.run_e2e_evaluation):
+                            stage_failed = True
+                    if stage_failed and fail_fast:
+                        break
 
                 if not is_success_state(str(state)) and fail_fast:
                     logger.error("Run %s ended with state=%s", rid, state)
@@ -328,7 +373,7 @@ class BenchmarkOrchestrator:
             repo_root=repo_root,
         )
 
-        return 0
+        return 1 if stage_failed else 0
 
     def _run_indexing_from_hpo(
         self,
@@ -340,7 +385,7 @@ class BenchmarkOrchestrator:
         hpo_run_id: str,
         base_row: dict[str, Any],
         bucket: str,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Chain: extract best HPO pattern -> submit indexing pipeline -> collect results."""
         ds_id = dataset.get("id", "unknown")
 
@@ -351,13 +396,9 @@ class BenchmarkOrchestrator:
             pattern_name_override=settings.indexing_pattern_name or None,
         )
 
-        full_key = dataset.get("full_input_data_key") or dataset.get("input_data_key", "")
-        if not dataset.get("full_input_data_key"):
-            logger.warning(
-                "Dataset %s has no full_input_data_key; indexing will reuse the HPO "
-                "subsample key %r, which defeats full-corpus evaluation.",
-                ds_id, full_key,
-            )
+        full_key = dataset.get("full_input_data_key")
+        if not full_key:
+            raise ValueError(f"Dataset {ds_id} has no full_input_data_key")
         indexing_args = build_indexing_arguments(
             pattern_settings,
             settings,
@@ -412,6 +453,7 @@ class BenchmarkOrchestrator:
             "pattern_score": pattern_settings.get("final_score"),
             "input_data_key_hpo": dataset.get("input_data_key", ""),
             "input_data_key_indexing": full_key,
+            "indexing_run_name": indexing_run_name,
         }
 
         if idx_timed_out:
@@ -419,7 +461,7 @@ class BenchmarkOrchestrator:
                 base_row, hpo_run_id, idx_rid, "TIMEOUT",
                 settings.indexing_timeout_seconds or settings.timeout_seconds,
                 **row_kwargs,
-            )]
+            )], indexing_args
 
         if idx_detail is None:
             idx_detail = client.get_run(idx_rid)
@@ -445,8 +487,10 @@ class BenchmarkOrchestrator:
             base_row, hpo_run_id, idx_rid, idx_state, dur,
             indexing_report=report_flat,
             e2e_metrics=e2e_metrics,
+            indexing_started_at=created.isoformat() if created else "",
+            indexing_finished_at=finished.isoformat() if finished else "",
             **row_kwargs,
-        )]
+        )], indexing_args
 
     def _collect_indexing_metrics(
         self,
@@ -496,7 +540,7 @@ class BenchmarkOrchestrator:
                 config=cfg,
                 bucket=bucket,
                 test_data_key=str(dataset.get("test_data_key") or ""),
-                indexed_data_key=str(dataset.get("full_input_data_key") or dataset.get("input_data_key") or ""),
+                indexed_data_key=str(dataset["full_input_data_key"]),
                 pattern_name=pattern_name,
                 timeout_seconds=settings.indexing_timeout_seconds or settings.timeout_seconds,
             )

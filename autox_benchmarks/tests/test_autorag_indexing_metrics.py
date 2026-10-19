@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from autorag_benchmark.indexing_from_hpo import build_indexing_arguments
 from autorag_benchmark.e2e_evaluation import rebase_test_data_document_keys
 from autorag_benchmark.indexing_report import flatten_report, store_binding_from_report
-from autorag_benchmark.metrics.quality_metrics import aggregate_evaluation_results
+from autorag_benchmark.metrics.quality_metrics import aggregate_evaluation_results, extract_quality_metrics
 from autorag_benchmark.metrics.scale_drift import calculate_scale_drift
 from autorag_benchmark.pipeline_params import align_database_secret_argument, build_pipeline_arguments, indexing_preset_for_dataset
 
@@ -144,6 +144,43 @@ def test_aggregate_evaluation_results_groups_judge_metrics() -> None:
     rows = [{"answer": "", "metrics": [{"name": "faithfulness", "evaluator": "unitxt", "score": 1.0}]}]
     out = aggregate_evaluation_results(rows, prefix="e2e_")
     assert out["e2e_unitxt_faithfulness_mean"] == 1.0
+
+
+def test_retrieval_metrics_keep_document_paths_distinct() -> None:
+    rows = [{
+        "correct_answer_document_keys": ["corpus/set_a/readme.md"],
+        "answer_contexts": [{"document_id": "corpus/set_b/readme.md"}],
+    }]
+    out = aggregate_evaluation_results(rows)
+    assert out["e2e_retrieval_hit_mean"] == 0.0
+    assert out["e2e_retrieval_document_recall_mean"] == 0.0
+
+
+def test_retrieval_metrics_accept_filename_only_context_ids() -> None:
+    rows = [{
+        "correct_answer_document_keys": ["corpus/set_a/readme.md"],
+        "answer_contexts": [{"document_id": "readme.md"}],
+    }]
+    assert aggregate_evaluation_results(rows)["e2e_retrieval_hit_mean"] == 1.0
+
+
+def test_missing_selected_hpo_pattern_does_not_use_another_pattern(monkeypatch) -> None:
+    from autorag_benchmark import pattern_scores
+
+    class FakeS3:
+        def get_paginator(self, operation):
+            assert operation == "list_objects_v2"
+            return self
+
+        def paginate(self, **kwargs):
+            return [{"Contents": [{"Key": f"{kwargs['Prefix']}rag_patterns/Pattern2/evaluation_results.json"}]}]
+
+        def get_object(self, **kwargs):
+            raise AssertionError("another pattern's artifact must not be read")
+
+    monkeypatch.setattr(pattern_scores, "create_s3_client", lambda config: FakeS3())
+    out = extract_quality_metrics("hpo-1", {}, "bucket", pattern_name="Pattern1")
+    assert out == {"hpo_quality_note": "evaluation_results.json not found for pattern Pattern1"}
 
 
 def test_aggregate_evaluation_results_handles_unsupported_schema() -> None:
