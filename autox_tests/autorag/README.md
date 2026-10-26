@@ -55,7 +55,7 @@ Scenarios live in `configs/test_configs.json`. Each entry specifies:
 | `description` | Human-readable summary |
 | `tags` | List of tags for runtime filtering via `-t` / `AUTORAG_FUNCTIONAL_TESTS_TAGS` |
 | `expected_result` | `"pass"` or `"fail"` |
-| `embedding_models` / `generation_models` | MaaS model IDs (JSON list, or `"env"` to read from `AUTORAG_EMBEDDING_MODELS` / `AUTORAG_GENERATION_MODELS`); required by the pipeline |
+| `embedding_models` / `generation_models` | MaaS model IDs (JSON list, or `"env"` to read from `BENCHMARK_EMBEDDING_MODELS` / `BENCHMARK_GENERATION_MODELS`); required by the pipeline |
 | `optimization_metric`, `optimization_max_rag_patterns`, `test_data_key` | Per-scenario parameter overrides |
 | `input_data_keys` | JSON list of document-folder paths within the input bucket; the pipeline discovers their union. An empty list scans the whole bucket. |
 | `db_secret_name` / `db_secret_name_env` | Optional dedicated Kubernetes database-secret name, or the environment variable that supplies it. Defaults to `VECTOR_DB_SECRET_NAME`. |

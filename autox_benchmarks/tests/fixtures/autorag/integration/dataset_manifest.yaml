@@ -1,0 +1,6 @@
+datasets:
+  - id: fanoutqa-txt-10-gold
+    name: "FanOutQA TXT (10 gold questions)"
+    input_data_key: "datasets/rag/fanoutqa/txt/10_gold/knowledge_base"
+    test_data_key: "datasets/rag/fanoutqa/txt/10_gold/benchmark_data.json"
+    optimization_metric: "answer_correctness"

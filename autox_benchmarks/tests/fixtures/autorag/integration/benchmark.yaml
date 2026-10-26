@@ -1,0 +1,21 @@
+# Online AutoRAG integration test: one FanOutQA optimization run against external S3.
+# Credentials come from autox_tests/.env.rag by default (or BENCHMARK_AUTORAG_ENV_FILE
+# / BENCHMARK_ENV_FILE / autox_benchmarks/.env). See tests/integration/README.md.
+
+pipeline:
+  mode: managed
+
+run:
+  optimization_metric: "answer_correctness"
+  optimization_max_rag_patterns: 4
+  preset: "balanced"
+  poll_interval_seconds: 30
+  timeout_seconds: 7200
+  enable_caching: false
+  run_name_prefix: "pytest-autorag-fanoutqa"
+
+storage:
+  # Integration runs must not pollute the benchmark results prefix.
+  upload_benchmark_results: false
+
+dataset_manifest_path: "dataset_manifest.yaml"

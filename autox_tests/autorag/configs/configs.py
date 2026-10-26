@@ -87,9 +87,9 @@ class AutoRAGTestConfig:
         expected_result: "pass" or "fail" — whether the pipeline run should succeed.
         embedding_models: Embedding model IDs for the search space. Required by the
             MaaS pipeline. A JSON list, or the sentinel "env" to read a JSON array /
-            comma-separated list from AUTORAG_EMBEDDING_MODELS.
+            comma-separated list from BENCHMARK_EMBEDDING_MODELS.
         generation_models: Generation model IDs for the search space. Required by the
-            MaaS pipeline. A JSON list, or "env" to read from AUTORAG_GENERATION_MODELS.
+            MaaS pipeline. A JSON list, or "env" to read from BENCHMARK_GENERATION_MODELS.
         optimization_max_rag_patterns: Cap on the number of RAG patterns explored.
         input_data_keys: Paths to the input document folders within the bucket.
             The pipeline discovers the union of all entries; an empty or unset
@@ -131,8 +131,8 @@ class AutoRAGTestConfig:
 
         Raises:
             EnvironmentError: When a model list uses the "env" sentinel but the
-                corresponding env var (AUTORAG_EMBEDDING_MODELS /
-                AUTORAG_GENERATION_MODELS) is not set.
+                corresponding env var (BENCHMARK_EMBEDDING_MODELS /
+                BENCHMARK_GENERATION_MODELS) is not set.
         """
         arguments = {
             "test_data_secret_name": base_config["test_data_secret_name"],
@@ -151,10 +151,12 @@ class AutoRAGTestConfig:
         if self.optimization_max_rag_patterns is not None:
             arguments["optimization_max_rag_patterns"] = self.optimization_max_rag_patterns
 
-        embedding_models = _resolve_model_list(self.embedding_models, "AUTORAG_EMBEDDING_MODELS")
+        embedding_models = _resolve_model_list(self.embedding_models, "BENCHMARK_EMBEDDING_MODELS")
         if embedding_models:
             arguments["embedding_models"] = embedding_models
-        generation_models = _resolve_model_list(self.generation_models, "AUTORAG_GENERATION_MODELS")
+        generation_models = _resolve_model_list(
+            self.generation_models, "BENCHMARK_GENERATION_MODELS"
+        )
         if generation_models:
             arguments["generation_models"] = generation_models
 
