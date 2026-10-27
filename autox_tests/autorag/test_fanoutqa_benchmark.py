@@ -290,7 +290,7 @@ def _dry_run_arguments(row: dict[str, str]) -> dict[str, Any]:
 
 @pytest.fixture(scope="session")
 def benchmark_config_path(tmp_path_factory) -> Path:
-    """Benchmark config YAML written to a temporary directory."""
+    """Benchmark config YAML and manifest written to a temporary directory."""
     return _write_benchmark_config(tmp_path_factory.mktemp("fanoutqa_benchmark"))
 
 
@@ -360,6 +360,9 @@ class TestFanoutqaBenchmarkRun:
 
         rows = _read_results_csv(benchmark_output_csv)
         assert rows, "expected at least one result row"
+        assert rows[0]["state"].upper() != "SUBMIT_ERROR", (
+            f"run submission failed: {rows[0].get('error', '')}"
+        )
         assert {row["dataset_id"] for row in rows} == {DATASET_ID}
         run_ids = {row["run_id"].strip() for row in rows}
         assert len(run_ids) == 1 and next(iter(run_ids)), "expected one KFP run_id"
@@ -408,6 +411,10 @@ class TestFanoutqaBenchmarkRun:
         assert rows[0]["dataset_id"] == DATASET_ID
         assert rows[0]["state"].upper() == "DRY_RUN"
         arguments = _dry_run_arguments(rows[0])
+        assert arguments["db_secret_name"], "pipeline db_secret_name is missing"
+        assert "vector_db_secret_name" not in arguments, (
+            "benchmark must not send the unknown vector_db_secret_name parameter"
+        )
         assert arguments["input_data_keys"] == [INPUT_DATA_KEY]
         assert arguments["test_data_key"] == TEST_DATA_KEY
         assert arguments["optimization_metric"] == "answer_correctness"
