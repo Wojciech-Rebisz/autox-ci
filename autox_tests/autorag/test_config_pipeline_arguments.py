@@ -24,8 +24,8 @@ _BASE = {
 def _clear_scenario_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AUTORAG_FUNCTIONAL_TESTS_TAGS", raising=False)
     monkeypatch.delenv("NEO4J_DB_SECRET_NAME", raising=False)
-    monkeypatch.setenv("BENCHMARK_EMBEDDING_MODELS", '["embedding-model"]')
-    monkeypatch.setenv("BENCHMARK_GENERATION_MODELS", '["generation-model"]')
+    monkeypatch.setenv("AUTORAG_EMBEDDING_MODELS", '["embedding-model"]')
+    monkeypatch.setenv("AUTORAG_GENERATION_MODELS", '["generation-model"]')
     monkeypatch.setenv("AUTORAG_INDEXING_EMBEDDING_MODEL_ID", "embedding-model")
     monkeypatch.setenv("AUTORAG_INDEXING_FOUNDATION_MODEL_ID", "generation-model")
 

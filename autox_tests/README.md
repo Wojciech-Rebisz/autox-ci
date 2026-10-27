@@ -445,8 +445,8 @@ Managed AutoRAG pipelines are used by default. `AUTORAG_PIPELINE_PATH` is requir
 
 | Variable | Purpose |
 |---|---|
-| `BENCHMARK_EMBEDDING_MODELS` | Embedding model IDs (JSON array / comma-separated) for optimization configs using `"env"` |
-| `BENCHMARK_GENERATION_MODELS` | Generation model IDs (JSON array / comma-separated) for optimization configs using `"env"` |
+| `AUTORAG_EMBEDDING_MODELS` | Embedding model IDs (JSON array / comma-separated) for optimization configs using `"env"` |
+| `AUTORAG_GENERATION_MODELS` | Generation model IDs (JSON array / comma-separated) for optimization configs using `"env"` |
 | `AUTORAG_INDEXING_EMBEDDING_MODEL_ID` | Single embedding model ID for indexing positive tests using `"env"` |
 | `AUTORAG_INDEXING_FOUNDATION_MODEL_ID` | Generation model ID used for Neo4j graph extraction in `IDX-P-3` |
 

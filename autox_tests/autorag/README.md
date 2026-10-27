@@ -122,8 +122,9 @@ the rest of the suite (`RHOAI_*`, `INPUT_DATA_*`, `TEST_DATA_*`, `MAAS_SECRET_NA
 
 Additional requirements specific to the benchmark run:
 
-- `BENCHMARK_EMBEDDING_MODELS` / `BENCHMARK_GENERATION_MODELS` (falls back to
-  `FUNC_TEST_EMBEDDING_MODELS` / `FUNC_TEST_GENERATION_MODELS`)
+- model lists: the test maps the suite's `AUTORAG_EMBEDDING_MODELS` /
+  `AUTORAG_GENERATION_MODELS` (or `FUNC_TEST_*`) to the `BENCHMARK_*` names read by
+  the benchmark loader, so no extra variables are needed
 - `RHOAI_PIPELINE_RUN_TIMEOUT` (otherwise the config default of `7200` s applies)
 
 Tests skip when the AutoRAG connection variables are missing, and fail fast when the

@@ -93,14 +93,30 @@ class BenchmarkContext:
     s3_client: Any
 
 
+MODEL_ENV_ALIASES = {
+    "BENCHMARK_EMBEDDING_MODELS": (
+        "AUTORAG_EMBEDDING_MODELS",
+        "FUNC_TEST_EMBEDDING_MODELS",
+    ),
+    "BENCHMARK_GENERATION_MODELS": (
+        "AUTORAG_GENERATION_MODELS",
+        "FUNC_TEST_GENERATION_MODELS",
+    ),
+}
+
+
 def _seed_model_env() -> None:
-    """Reuse the suite's model env vars when the benchmark-specific ones are unset."""
-    for benchmark_name, suite_name in (
-        ("BENCHMARK_EMBEDDING_MODELS", "FUNC_TEST_EMBEDDING_MODELS"),
-        ("BENCHMARK_GENERATION_MODELS", "FUNC_TEST_GENERATION_MODELS"),
-    ):
-        if not os.environ.get(benchmark_name) and os.environ.get(suite_name):
-            os.environ[benchmark_name] = os.environ[suite_name]
+    """Feed the benchmark loader from the suite's model env vars when needed."""
+    for target, aliases in MODEL_ENV_ALIASES.items():
+        if os.environ.get(target):
+            continue
+        for alias in aliases:
+            if os.environ.get(alias):
+                os.environ[target] = os.environ[alias]
+                break
+
+
+_seed_model_env()
 
 
 def _write_benchmark_config(config_dir: Path) -> Path:
@@ -224,7 +240,6 @@ def _collect_prerequisite_errors(
 
 def _build_context(config_path: Path) -> BenchmarkContext:
     """Build the benchmark context, failing fast on missing prerequisites."""
-    _seed_model_env()
     try:
         cfg, config_dir = load_merged_benchmark_config(config_path)
     except Exception as exc:
